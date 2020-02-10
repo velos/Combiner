@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 @dynamicMemberLookup
-public protocol Combiner: AssociatedObjectStore, BindableObject {
+public protocol Combiner: AssociatedObjectStore, ObservableObject {
     associatedtype State
     associatedtype Action
     associatedtype Mutation = Action
@@ -31,32 +31,47 @@ public protocol Combiner: AssociatedObjectStore, BindableObject {
     var action: PassthroughSubject<Action, Never> { get }
     var state: AnyPublisher<State, Never> { get }
 
-    subscript<U>(dynamicMember keyPath: WritableKeyPath<State, U>) -> Binding<U> { get }
+    subscript<U>(dynamicMember keyPath: KeyPath<State, U>) -> U { get }
 }
 
 extension Combiner {
-    public subscript<U>(dynamicMember keyPath: WritableKeyPath<State, U>) -> Binding<U> {
-        return Binding(getValue: {
-            return self.currentState[keyPath: keyPath]
-        }, setValue: { value in
-            self.updateState(value: value, keyPath: keyPath)
-        })
+
+    public func binding<U>(action: @escaping (U) -> Action, getter keyPath: KeyPath<State, U>) -> Binding<U> {
+        return Binding(
+            get: { self.currentState[keyPath: keyPath] },
+            set: { self.action.send(action($0)) }
+        )
+    }
+
+    public subscript<U>(dynamicMember keyPath: KeyPath<State, U>) -> U {
+        return currentState[keyPath: keyPath]
+    }
+
+    public func action(_ action: Action) -> () -> Void {
+        return {
+            self.action.send(action)
+        }
     }
 }
 
 extension Combiner {
-    public var willChange: AnyPublisher<State, Never> {
-        return state
+    public var objectWillChange: AnyPublisher<Void, Never> {
+        return _willChange.eraseToAnyPublisher()
     }
 }
 
 private var actionKey = "action"
+private var willChangeKey = "willChange"
 private var currentStateKey = "currentState"
 private var stateKey = "state"
-private var manualStateUpdateKey = "manualStateUpdate"
 private var cancellableKey = "cancellable"
 
 extension Combiner {
+
+    private var _willChange: PassthroughSubject<Void, Never> {
+        return self.associatedObject(forKey: &willChangeKey, default: .init())
+    }
+
     private var _action: PassthroughSubject<Action, Never> {
         return self.associatedObject(forKey: &actionKey, default: .init())
     }
@@ -84,15 +99,6 @@ extension Combiner {
         return self._state
     }
 
-    fileprivate var manualStateUpdate: PassthroughSubject<State, Never> {
-        return self.associatedObject(forKey: &manualStateUpdateKey, default: PassthroughSubject<State, Never>())
-    }
-
-    fileprivate func updateState<U>(value: U, keyPath: WritableKeyPath<State, U>) {
-        currentState[keyPath: keyPath] = value
-        manualStateUpdate.send(currentState)
-    }
-
     fileprivate var cancellable: Cancellable? {
         get { return self.associatedObject(forKey: &cancellableKey, default: nil) }
         set { self.setAssociatedObject(newValue, forKey: &cancellableKey)}
@@ -112,15 +118,15 @@ extension Combiner {
         let state = transformedMutation
             .scan(initialState, { [weak self] (state, mutation) -> State in
                 guard let self = self else { return state }
+                self._willChange.send()
                 return self.reduce(state: state, mutation: mutation)
             })
             .prepend(initialState)
             .eraseToAnyPublisher()
 
-        let transformedState = Publishers.Merge(
-            self.transform(state: state),
-            manualStateUpdate
-        ).eraseToAnyPublisher()
+        let transformedState = self.transform(state: state)
+            .share()
+            .eraseToAnyPublisher()
 
         self.cancellable = transformedState
             .assign(to: \.currentState, on: self)

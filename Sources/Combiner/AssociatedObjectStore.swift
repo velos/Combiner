@@ -28,4 +28,3 @@ extension AssociatedObjectStore {
         objc_setAssociatedObject(self, key, object, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 }
-
