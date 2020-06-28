@@ -1,6 +1,6 @@
 //
 //  AssociatedObjectStore.swift
-//  ReactorKit
+//  Combiner
 //
 //  Created by Suyeol Jeon on 14/04/2017.
 //  Copyright © 2017 Suyeol Jeon. All rights reserved.

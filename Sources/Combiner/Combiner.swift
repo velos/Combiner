@@ -1,18 +1,5 @@
 import Foundation
 import Combine
-import SwiftUI
-
-extension View {
-    public func combinerEnvironment<V, T: Combiner>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, combiner: T, action: @escaping (V) -> T.Action) -> some View {
-        return self.transformEnvironment(keyPath, transform: { value in
-            combiner.action.send(action(value))
-        })
-    }
-
-    public func subscribeCombiner<T: Combiner>(_ combiner: T) -> some View {
-        return self.onReceive(combiner.state, perform: { _ in })
-    }
-}
 
 @dynamicMemberLookup
 public protocol Combiner: AssociatedObjectStore, ObservableObject, Identifiable {
@@ -49,96 +36,8 @@ public protocol Combiner: AssociatedObjectStore, ObservableObject, Identifiable 
 }
 
 extension Combiner {
-
-    public func binding<U>(action: @escaping (U) -> Action, getter keyPath: KeyPath<State, U>) -> Binding<U> {
-        return Binding(
-            get: { self.currentState[keyPath: keyPath] },
-            set: { self.action.send(action($0)) }
-        )
-    }
-
-    public func binding<U>(action: @escaping (U) -> Action, getter closure: @escaping (State) -> U) -> Binding<U> {
-        return Binding(
-            get: { closure(self.currentState) },
-            set: { self.action.send(action($0)) }
-        )
-    }
-
-    public func binding<U>(getter keyPath: KeyPath<State, U>) -> Binding<U> {
-        return Binding(
-            get: { self.currentState[keyPath: keyPath] },
-            set: { _ in }
-        )
-    }
-
-    public func binding<U>(getter closure: @escaping (State) -> U) -> Binding<U> {
-        return Binding(
-            get: { closure(self.currentState) },
-            set: { _ in }
-        )
-    }
-
     public subscript<U>(dynamicMember keyPath: KeyPath<State, U>) -> U {
         return currentState[keyPath: keyPath]
-    }
-
-    public func action(_ action: Action) -> () -> Void {
-        // create a state stream if it doesn't exist already.
-        _ = self._state
-
-        return {
-            self.action.send(action)
-        }
-    }
-
-    public func environment<V>(_ environment: EnvironmentObject<V>, action: @escaping (V.ObjectWillChangePublisher.Output) -> Action) -> AnyCancellable {
-        return environment.wrappedValue.objectWillChange.sink { (value: V.ObjectWillChangePublisher.Output) in
-            self.action.send(action(value))
-        }
-    }
-}
-
-private struct CombinerEnvironmentObservingView<V: View, C: Combiner, E: ObservableObject>: View {
-    let originalView: V
-    let combiner: C
-    let environment: EnvironmentObject<E>
-    let action: (E.ObjectWillChangePublisher.Output) -> C.Action
-
-    @State private var cancellable: Cancellable?
-
-    var body: some View {
-        originalView.onAppear {
-            self.cancellable = self.combiner.environment(self.environment, action: self.action)
-        }
-        .onDisappear {
-            self.cancellable = nil
-        }
-    }
-}
-
-extension View {
-    public func combinerEnvironmentObserve<V, T: Combiner>(_ environment: EnvironmentObject<V>, combiner: T, action: @escaping (V.ObjectWillChangePublisher.Output) -> T.Action) -> some View {
-        return CombinerEnvironmentObservingView(originalView: self, combiner: combiner, environment: environment, action: action)
-    }
-}
-
-extension Combiner {
-    public var objectWillChange: ObservableObjectPublisher {
-        return _willChange
-    }
-}
-
-@objc
-class CancelBox: NSObject {
-
-    private let cancellable: AnyCancellable
-
-    init(cancellable: AnyCancellable) {
-        self.cancellable = cancellable
-    }
-
-    deinit {
-        cancellable.cancel()
     }
 }
 
@@ -148,14 +47,25 @@ private var currentStateKey = "currentState"
 private var stateKey = "state"
 private var cancellableKey = "cancellable"
 private var identifier = "identifier"
+private var isStubEnabledKey = "isStubEnabled"
+private var stubKey = "stub"
 
+extension Combiner where State: Equatable {
+    public var state: AnyPublisher<State, Never> {
+        // It seems that Swift has a bug in associated object when subclassing a generic class. This is
+        // a temporary solution to bypass the bug. See #30 for details.
+        return self._state.removeDuplicates().eraseToAnyPublisher()
+    }
+}
+
+// swiftlint:disable identifier_name
 extension Combiner {
 
-    private var _willChange: ObservableObjectPublisher {
+    var _willChange: ObservableObjectPublisher {
         return self.associatedObject(forKey: &willChangeKey, default: .init())
     }
 
-    private var _action: PassthroughSubject<Action, Never> {
+    var _action: PassthroughSubject<Action, Never> {
         return self.associatedObject(forKey: &actionKey, default: .init())
     }
 
@@ -163,7 +73,7 @@ extension Combiner {
         // Creates a state stream automatically
         _ = self._state
 
-        return _action
+        return self._action
     }
 
     public var id: String {
@@ -178,18 +88,27 @@ extension Combiner {
         }
     }
 
-    private var _cancellables: Set<CancelBox> {
-        get { return self.associatedObject(forKey: &cancellableKey, default: Set<CancelBox>()) }
+    var _cancellables: Set<AnyCancellable> {
+        get { return self.associatedObject(forKey: &cancellableKey, default: Set<AnyCancellable>()) }
         set { self.setAssociatedObject(newValue, forKey: &cancellableKey) }
     }
 
-    private var _state: AnyPublisher<State, Never> {
-        return self.associatedObject(forKey: &stateKey, default: self.createStateStream())
+    var _state: AnyPublisher<State, Never> {
+        if self.isStubEnabled {
+            return self.stub.state.eraseToAnyPublisher()
+        } else {
+            return self.associatedObject(forKey: &stateKey, default: self.createStateStream())
+        }
     }
+
     public var state: AnyPublisher<State, Never> {
         // It seems that Swift has a bug in associated object when subclassing a generic class. This is
         // a temporary solution to bypass the bug. See #30 for details.
         return self._state
+    }
+
+    public func createStateStreamIfNecessary() {
+        _ = self._state
     }
 
     public func createStateStream() -> AnyPublisher<State, Never> {
@@ -225,7 +144,7 @@ extension Combiner {
         let cancellable = transformed
             .sink(receiveValue: { _ in })
 
-        _cancellables.insert(CancelBox(cancellable: cancellable))
+        _cancellables.insert(cancellable)
 
         return transformed
     }
@@ -251,8 +170,41 @@ extension Combiner {
     }
 }
 
+extension Combiner {
+    public var isStubEnabled: Bool {
+        set { self.setAssociatedObject(newValue, forKey: &isStubEnabledKey) }
+        get { return self.associatedObject(forKey: &isStubEnabledKey, default: false) }
+    }
+
+    public var stub: Stub<Self> {
+        return self.associatedObject(
+            forKey: &stubKey,
+            default: Stub(combiner: self, cancellables: &_cancellables)
+        )
+    }
+
+    public func stubbed(with state: Self.State) -> Self {
+        self.isStubEnabled = true
+        self.stub.state.send(state)
+        return self
+    }
+
+    public func stubbed() -> Self {
+        self.isStubEnabled = true
+        return self
+    }
+}
+
 extension Combiner where Action == Mutation {
     public func mutate(action: Action) -> AnyPublisher<Mutation, Never> {
         return Just(action).eraseToAnyPublisher()
     }
 }
+
+extension Combiner {
+    public var objectWillChange: ObservableObjectPublisher {
+        return _willChange
+    }
+}
+
+// swiftlint:enable identifier_name
