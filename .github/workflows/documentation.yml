@@ -20,6 +20,7 @@ jobs:
         with:
           inputs: "Sources"
           module-name: Combiner
+          base-url: "https://github.com/velos/Combiner/wiki"
           output: "Documentation"
       - name: Upload Documentation to Wiki
         uses: SwiftDocOrg/github-wiki-publish-action@v1
