@@ -83,8 +83,15 @@ extension Combiner {
     public internal(set) var currentState: State {
         get { return self.associatedObject(forKey: &currentStateKey, default: self.initialState) }
         set {
-            self._willChange.send()
-            self.setAssociatedObject(newValue, forKey: &currentStateKey)
+            if Thread.isMainThread {
+                self._willChange.send()
+            } else {
+                DispatchQueue.main.async {
+                    self._willChange.send()
+                }
+            }
+
+            setAssociatedObject(newValue, forKey: &currentStateKey)
         }
     }
 
@@ -120,7 +127,6 @@ extension Combiner {
             .flatMap { [weak self] action -> AnyPublisher<Mutation, Never> in
                 guard let self = self else { return Empty().eraseToAnyPublisher() }
                 return self.mutate(action: action)
-                    .receive(on: DispatchQueue.main)
                     .eraseToAnyPublisher()
             }.eraseToAnyPublisher()
 
@@ -135,18 +141,16 @@ extension Combiner {
             .eraseToAnyPublisher()
 
         let transformed = self.transform(state: state)
-            .handleEvents(receiveOutput: { [weak self] newState in
-                self?.currentState = newState
-            })
-            .share()
             .eraseToAnyPublisher()
 
-        let cancellable = transformed
-            .sink(receiveValue: { _ in })
-
-        _cancellables.insert(cancellable)
+        transformed
+            .assign(to: \.currentState, on: self)
+            .store(in: &_cancellables)
 
         return transformed
+            .share()
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
     }
 
     public func transform(action: AnyPublisher<Action, Never>) -> AnyPublisher<Action, Never> {
