@@ -141,14 +141,13 @@ extension Combiner {
             .eraseToAnyPublisher()
 
         let transformed = self.transform(state: state)
-            .eraseToAnyPublisher()
+            .share()
 
         transformed
             .assign(to: \.currentState, on: self)
             .store(in: &_cancellables)
 
         return transformed
-            .share()
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }
