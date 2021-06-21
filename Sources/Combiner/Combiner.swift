@@ -83,15 +83,15 @@ extension Combiner {
     public internal(set) var currentState: State {
         get { return self.associatedObject(forKey: &currentStateKey, default: self.initialState) }
         set {
-            if Thread.isMainThread {
+            let update = {
                 self._willChange.send()
-            } else {
-                DispatchQueue.main.async {
-                    self._willChange.send()
-                }
+                self.setAssociatedObject(newValue, forKey: &currentStateKey)
             }
-
-            setAssociatedObject(newValue, forKey: &currentStateKey)
+            if Thread.isMainThread {
+                update()
+            } else {
+                DispatchQueue.main.async(execute: update)
+            }
         }
     }
 
