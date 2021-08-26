@@ -8,7 +8,7 @@
 
 import Combine
 
-public protocol View: class, AssociatedObjectStore {
+public protocol View: AnyObject, AssociatedObjectStore {
   associatedtype Combiner
 
   /// Cancellables. It is cancelled each time the `combiner` is assigned.
