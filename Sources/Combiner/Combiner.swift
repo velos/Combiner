@@ -144,7 +144,9 @@ extension Combiner {
             .share()
 
         transformed
-            .assign(to: \.currentState, on: self)
+            .sink { [weak self] newState in
+                self?.currentState = newState
+            }
             .store(in: &_cancellables)
 
         return transformed
