@@ -115,7 +115,9 @@ extension Combiner {
     }
 
     public func createStateStreamIfNecessary() {
-        _ = self._state
+        DispatchQueue.main.async {
+            _ = self._state
+        }
     }
 
     public func createStateStream() -> AnyPublisher<State, Never> {
