@@ -46,6 +46,7 @@ private var willChangeKey = "willChange"
 private var currentStateKey = "currentState"
 private var stateKey = "state"
 private var cancellableKey = "cancellable"
+private var hasInitializedKey = "hasInitialized"
 private var identifier = "identifier"
 private var isStubEnabledKey = "isStubEnabled"
 private var stubKey = "stub"
@@ -76,6 +77,11 @@ extension Combiner {
         return self._action
     }
 
+    private var hasInitialized: Bool {
+        get { self.associatedObject(forKey: &hasInitializedKey, default: false) }
+        set { self.setAssociatedObject(newValue, forKey: &hasInitializedKey) }
+    }
+
     public var id: String {
         return self.associatedObject(forKey: &identifier, default: UUID().uuidString)
     }
@@ -86,8 +92,10 @@ extension Combiner {
             let update = {
                 self._willChange.send()
                 self.setAssociatedObject(newValue, forKey: &currentStateKey)
+                self.hasInitialized = true
             }
-            if Thread.isMainThread {
+
+            if Thread.isMainThread && hasInitialized {
                 update()
             } else {
                 DispatchQueue.main.async(execute: update)
@@ -109,18 +117,10 @@ extension Combiner {
     }
 
     public var state: AnyPublisher<State, Never> {
-        // It seems that Swift has a bug in associated object when subclassing a generic class. This is
-        // a temporary solution to bypass the bug. See #30 for details.
         return self._state
     }
 
-    public func createStateStreamIfNecessary() {
-        DispatchQueue.main.async {
-            _ = self._state
-        }
-    }
-
-    public func createStateStream() -> AnyPublisher<State, Never> {
+    private func createStateStream() -> AnyPublisher<State, Never> {
 
         let action = self._action.eraseToAnyPublisher()
         let transformedAction = self.transform(action: action)

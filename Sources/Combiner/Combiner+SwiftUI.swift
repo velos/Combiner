@@ -40,8 +40,8 @@ extension Combiner {
     }
 
     public func action(_ action: Self.Action) -> () -> Void {
-        // create a state stream if it doesn't exist already.
-        createStateStreamIfNecessary()
+        // create the action (and state stream) if it doesn't exist already
+        _ = self.action
 
         return { [weak self] in
             self?.action.send(action)
