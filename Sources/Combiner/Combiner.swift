@@ -95,11 +95,7 @@ extension Combiner {
                 self.hasInitialized = true
             }
 
-            if Thread.isMainThread && hasInitialized {
-                update()
-            } else {
-                DispatchQueue.main.async(execute: update)
-            }
+            DispatchQueue.main.async(execute: update)
         }
     }
 
