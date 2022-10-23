@@ -27,9 +27,7 @@ extension Combiner {
         return Binding(
             get: { closure(self.currentState) },
             set: { [weak self] (value: U) in
-                DispatchQueue.main.async {
-                    self?.action.send(action(value))
-                }
+                self?.action.send(action(value))
             }
         )
     }
