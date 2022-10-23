@@ -21,12 +21,25 @@ extension SwiftUI.View {
     }
 }
 
-extension Combiner {
+private class BindingCache<V> {
+    init(_ value: V) {
+        self.cachedValue = value
+    }
+    var cachedValue: V
+}
 
-    public func binding<U>(action: @escaping (U) -> Self.Action, getter closure: @escaping (Self.State) -> U) -> Binding<U> {
+extension Combiner {
+    public func binding<U>(action: @escaping (U) -> Self.Action, getter: @escaping (Self.State) -> U) -> Binding<U> {
+        let bindingCache = BindingCache(getter(self.currentState))
         return Binding(
-            get: { closure(self.currentState) },
+            get: {
+                // Isolate SwiftUI from the slow-updating Combiner.State (slow due to the action + mutation
+                // publishing cycle required for writes to take effect) by returning the cached value immediately.
+                // This is required for some SwiftUI elements to behave correctly, such as `TextEditor(text: Binding<String>)`
+                bindingCache.cachedValue
+            },
             set: { [weak self] (value: U) in
+                bindingCache.cachedValue = value
                 self?.action.send(action(value))
             }
         )
