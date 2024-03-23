@@ -8,7 +8,7 @@
 
 import Combine
 
-#if os(iOS) || os(tvOS)
+#if os(iOS) || os(tvOS) || os(visionOS)
 import UIKit
 private typealias OSViewController = UIViewController
 #elseif os(OSX)
